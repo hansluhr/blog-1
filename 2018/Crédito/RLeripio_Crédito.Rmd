@@ -1,0 +1,134 @@
+---
+title: "Juros a pessoa física: um modelo explicativo"
+author: "http://rleripio.com.br/juros-a-pessoa-fisica-um-modelo-explicativo/"
+date: "6 de novembro de 2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introdução
+
+Apesar da expressiva redução na taxa básica de juros desde meados de 2016, a taxa de juros ao tomador não recuou na mesma proporção  — e isto a despeito do recuo observado na inadimplência. O que pode explicar isto? Motivados por esta aparente contradição, este exercício propõe estimar um modelo que, além de uma taxa de juros de referência e da inadimplência, incorpora também uma medida de incerteza sobre a economia. A hipótese básica é que o aumento da incerteza gera um comportamento mais conservador por parte dos bancos. 
+
+Com o objetivo de verificar se esta hipótese faz algum sentido empírico, foi formulada a seguinte especificação para a taxa de juros ao tomador:
+
+$$Juros^{tomador}_t = \beta_0 + \beta_1Juros^{ref}_{t-j} + \beta_2Inad_{t-k} + \beta_3 Incerteza_{t-l} + \sum_{i=1}^{3}D_i + \epsilon_t$$
+
+Em que:
+
+$Juros^{tomador}$: Taxa média de juros - recursos livres - pessoa física - total (SGS/BCB: 20740)
+
+$Juros^{ref}$: Foram testadas as taxas Selic e Swap pré-DI 30, 60, 90, 120, 180 e 360. Por fim, utilizou-se a taxa Swap pré-DI 90 (SGS/BCB: 7818)
+
+$Inad$: Inadimplência - pessoa física - total (SGS/BCB: 21112)
+
+$Incerteza$: Foram testados a medida de risco-país (Embi) e o índice de incerteza da economia da FGV. O modelo final considerou este último.
+
+$D$: dummies trimestrais.
+
+${j,k,l}$: indicam defasagens utilizadas.
+
+## Código para replicar (acompanha arquivo .RData)
+
+**Passo 1: carregar os pacotes necessários.**
+
+```{r, message=F, warning=F}
+
+library(tidyverse)
+library(rbcb)
+library(readxl)
+
+```
+
+**Passo 2: importar os dados necessários**
+
+```{r, message=F, warning=F}
+
+iie <- read_excel("iie.xlsx") %>%
+  
+  dplyr::mutate(quarter = lubridate::quarter(Data, with_year = TRUE)) %>%
+  
+  dplyr::group_by(quarter) %>%
+  
+  dplyr::summarise(iie = log(mean(iie)))
+
+
+embi <- read_excel("embi.xls") %>%
+  
+  dplyr::mutate(Data = lubridate::dmy(date),
+                quarter = lubridate::quarter(Data, with_year = T)) %>%
+  
+  dplyr::group_by(quarter) %>%
+  
+  dplyr::summarise(embi = log(mean(embi, na.rm = T)))
+
+series <- list("Juros" = 20740,
+               "Inad" = 21112,
+               "Endi" = 20400,
+               "DI_90" = 7818)
+
+dados <- rbcb::get_series(series) %>% 
+  
+  purrr::reduce(inner_join) %>%
+  
+  dplyr::mutate(quarter = lubridate::quarter(date, with_year = T)) %>%
+  
+  dplyr::group_by(quarter) %>%
+  
+  dplyr::summarise_at(vars(-quarter), funs(mean)) %>%
+  
+  dplyr::select(-date)
+
+dados_aux <- dplyr::left_join(dados, iie) %>% dplyr::left_join(embi)
+
+```
+
+**Passo 3: diferenciar as séries que apresentam raiz unitária**
+
+```{r, message=F, warning=F}
+
+testes <- list(kpss = "kpss", pp = "pp", adf = "adf")
+
+ur_map <- function(x) purrr::map(testes, function(y){forecast::ndiffs(x, alpha = 0.05, y)})
+
+dados_ndiffs <- dados_aux[-1] %>% 
+  
+  purrr::map(.f = ur_map) %>%
+  
+  plyr::ldply(bind_rows) %>%
+  
+  dplyr::mutate(Diferenciar = ifelse(kpss + adf + pp >= 2, "SIM", "NÃO"))
+
+dados_labs <- dados_ndiffs %>% 
+  
+  dplyr::filter(Diferenciar == "SIM") %>% 
+  
+  dplyr::select(.id)
+
+dif <- function(x){x-dplyr::lag(x)}
+
+dados_dif <- dados_aux %>% 
+  
+  dplyr::mutate_at(vars(dados_labs$.id), funs(dif)) %>%
+  
+  tidyr::drop_na() %>%
+  
+  dplyr::mutate(tri = sub('.*\\.', '', quarter) %>% as.numeric())
+
+```
+
+**Passo 4: estimar o modelo**
+
+```{r, message=F, warning=F}
+
+modelo_lm <- lm(Juros ~ lag(DI_90, 1) + lag(Inad,1) + lag(iie,3) + factor(tri), 
+                data = dados_dif)
+
+summary(modelo_lm)
+
+```
+
+Em conjunto, os resultados parecem corroborar a ideia de que a inadimplência é um fator relevante para explicar a taxa de juros ao tomador. Por outro lado, a incerteza apresenta significância estatística e, portanto, contribui para aumentar os juros ao tomador. Isto parece estar em linha com a ideia de uma postura mais conservadora dos bancos.
