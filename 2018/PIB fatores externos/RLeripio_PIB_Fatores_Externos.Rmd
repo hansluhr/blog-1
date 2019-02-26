@@ -1,0 +1,186 @@
+---
+title: "Fatores externos explicam a dinâmica do PIB?"
+author: "http://rleripio.com.br/fatores-externos-explicam-a-dinamica-do-pib/"
+date: "7 de novembro de 2018"
+output: pdf_document
+---
+
+## Introdução
+
+No último dia 03 foram divulgados alguns capítulos da nova versão do \href{https://www.imf.org/en/Publications/WEO/}{World Economic Outlook} -- publicação bastante relevante do FMI que busca analisar a economia mundial em diversas dimensões. Mais adiante, o relatório trará as projeções atualizadas da instituição para o crescimento do PIB de diversas economias. E por que isso é importante? De maneira geral, porque existe uma relação entre o desempenho de algumas economias e o desempenho da economia brasileira. O gráfico abaixo compara o crescimento do PIB brasileiro com o que vamos chamar aqui de PIB Externo. O PIB Externo foi construído, basicamente, a partir do crescimento do PIB dos 5 maiores parceiros comerciais do Brasil ponderado pela respectiva participação na pauta de exportação. Cabe notar que este grupo de países sofreu algumas mudanças ao longo do tempo, mas representam, em média, cerca de 60% da pauta total de exportações.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(tidyverse)
+library(readxl)
+library(RcppRoll)
+
+source("acumular.R")
+
+dados <- readxl::read_excel("dados.xlsx")
+
+dados %>% 
+  
+  dplyr::select(date, Brasil = pib_brasil, Externo = pib_mundo) %>%
+
+  dplyr::mutate(Brasil = c(rep(NA,3), acum(Brasil,4)),
+                Externo = c(rep(NA,3), acum(Externo, 4))) %>%
+
+  tidyr::drop_na() %>%
+
+  tidyr::gather(key = var, value = valor, -date) %>%
+
+  ggplot(aes(x = date, y = valor, linetype = var, color = var), group = 1) +
+
+  geom_line(lwd = 1.2) +
+
+  labs(title = "Produto Interno Bruto",
+       subtitle = "Variação acumulada em 4 trimestres (p.p)",
+       color = "",
+       linetype = "",
+       x = "",
+       y = "") +
+
+  theme_get()
+
+```
+
+O que chama a atenção logo de cara é que a aderência entre as duas séries se perde a partir do final de 2014. Isto é, o PIB brasileiro deixou de crescer em linha com o PIB externo. Alguns analistas culpam a chamada Nova Matriz Econômica -- como ficou conhecida a política econômica do governo Dilma -- por essa desaceleração mais forte da economia brasileira. De fato, ao menos no que diz respeito àquelas economias que mais transacionam com o Brasil, parece não haver uma justificativa externa para desaceleração tão forte. De todo modo, não temos a intenção de entrar nesse debate. O objetivo aqui é responder à seguinte questão: fatores externos ajudam a explicar o crescimento da economia brasileira?
+
+Para isso, vamos especificar o seguinte modelo:
+
+$$PIB^{Brasil}_t = \alpha + \beta_1 PIB^{Externo}_t + \beta_2 \Delta TT_t + \beta_3TB^{10yr}_t + \beta_4 log(EMBI_t) + \beta_5 (TB^{10yr}_t \times log(EMBI_t)) + \epsilon_t$$
+
+Onde:
+
+$TT$: são os termos de troca, razão entre preços de exportação e de importação;
+
+$TB^{10yr}$: é a taxa de juros dos títulos de 10 anos da economia americana;
+
+$EMBI$: é uma medida de prêmio de risco da economia brasileira;
+
+Vale destacar a inclusão de um termo interativo entre a taxa de juros dos títulos americanos e o prêmio de risco para o Brasil. O prêmio de risco, é bom lembrar, não é uma variável puramente externa, mas pode conter elementos domésticos. Entretanto, é um fato estilizado que os choques externos são mais pronunciados na presença de maior vulnerabilidade da economia, o que seguramente é refletido nos prêmios de risco. Por esta razão, optamos por incluir a variável na especificação.
+
+## Código para replicar o modelo (acompanha arquivo .RData)
+
+**Passo 1: carregar pacotes e importar a planilha com os dados**
+
+```{r, message=F, warning=F}
+
+library(tidyverse)
+library(readxl)
+library(RcppRoll)
+
+source("acumular.R")
+
+dados <- readxl::read_excel("dados.xlsx")
+
+```
+
+**Passo 2: Testar e diferenciar séries não estacionárias**
+
+```{r, message=F, warning=F}
+
+testes <- list(kpss = "kpss", pp = "pp", adf = "adf")
+
+ur_map <- function(x) purrr::map(testes, function(y){forecast::ndiffs(x, alpha = 0.05, y)})
+
+series_ndiffs <- dados %>%
+
+  dplyr::select(-c(date, embi, tb_10yr)) %>%
+
+  purrr::map(.f = ur_map) %>%
+
+  plyr::ldply(bind_rows) %>%
+
+  dplyr::mutate(Diferenciar = ifelse(kpss + adf + pp >= 2, "SIM", "NÃO"))
+
+series_labs <- series_ndiffs %>%
+
+  dplyr::filter(Diferenciar == "SIM") %>%
+
+  dplyr::select(.id)
+
+dif <- function(x){x-dplyr::lag(x)}
+
+dados_dif <- dados %>%
+
+  dplyr::mutate_at(vars(series_labs$.id), funs(dif))
+
+```
+
+
+**Passo 3: Estimar o modelo**
+
+```{r, message=F, warning=F}
+
+modelo <- lm(pib_brasil ~ pib_mundo + termos + tb_10yr*embi, data = dados_dif)
+
+summary(modelo)
+
+
+```
+
+**Passo 4: Observar gráficamente os coeficientes**
+
+```{r, message=F, warning=F}
+
+modelo_tidy <- sweep::sw_tidy(modelo) %>%
+
+  dplyr::mutate(lower = estimate-1.64*std.error,
+                upper = estimate+1.64*std.error)
+
+modelo_tidy %>%
+
+  dplyr::filter(term != c("(Intercept)", "tb_10yr:embi")) %>%
+
+  ggplot(aes(x = term, y = estimate, color = term)) +
+
+  geom_point(size = 2) +
+
+  geom_errorbar(aes(ymax = estimate+std.error, ymin = estimate - std.error)) +
+
+  geom_hline(yintercept = 0, lwd = 1) +
+
+  labs(x = "", y = "",
+       title = "Coeficientes do modelo",
+       subtitle = "Nível de significância: 90%") +
+
+  theme(legend.position = "none")
+
+```
+
+**Passo 5: Observar graficamente o ajuste**
+
+```{r, message=F, warning=F}
+
+modelo_tbl <- sweep::sw_augment(modelo) %>%
+
+  dplyr::select(`PIB Brasil` = pib_brasil, `Modelo` = .fitted) %>%
+
+  dplyr::mutate(quarter = dados_dif$date[-1])
+
+modelo_tbl %>% tidyr::gather(key = var, value = valor, -quarter) %>%
+
+  dplyr::mutate_at(vars(var), funs(factor(., levels = c("PIB Brasil", "Modelo")))) %>%
+
+  ggplot(aes(x = quarter, y = valor, linetype = var, color = var), group = 1) +
+
+  scale_color_manual(values = c("steelblue2", "red")) +
+
+  geom_line(lwd = 1.2) +
+
+  labs(title = "Produto Interno Bruto - Brasil",
+       subtitle = "Variação trimestral (p.p)",
+       color = "",
+       linetype = "",
+       x = "",
+       y = "") +
+
+  theme_get()
+
+```
+
+Os resultados apontam que o crescimento do PIB Externo e dos termos de troca são positivamente relacionados com o desempenho da economia brasileira, ao passo que o aumento dos juros dos títulos americanos e do risco se relacionam negativamente com a atividade nacional.
+
+O ajuste do modelo também é bastante razoável, se levarmos em consideração o baixo nível de complexidade. Mais especificamente, as variáveis incluídas explicam cerca de 40% da variação observada no PIB brasileiro ($R^2$-ajustado) -- os 60% restantes seriam explicados por fatores domésticos, externos não capturados nas variáveis e erros de natureza estocástica.
