@@ -3,19 +3,17 @@
 
 ### 1. Preliminar ----
 
-setwd("W:\\Núcleo de análises econômicas\\Projeção TP")
-
 library(tidyverse)
 library(readxl)
 library(zoo)
 
 ### 2. Importar arquivos ----
 
-pea_pia <- readxl::read_excel("Brasil/pea_pia_BR.xlsx")
+pea_pia <- readxl::read_excel("pea_pia_BR.xlsx")
 
-proj_ibge_h <- readxl::read_excel("Brasil/proj_pop_ibge_BR.xlsx", sheet = "Homens")
+proj_ibge_h <- readxl::read_excel("proj_pop_ibge_BR.xlsx", sheet = "Homens")
 
-proj_ibge_m <- readxl::read_excel("Brasil/proj_pop_ibge_BR.xlsx", sheet = "Mulheres")
+proj_ibge_m <- readxl::read_excel("proj_pop_ibge_BR.xlsx", sheet = "Mulheres")
 
 ### 3. Adequar os dados ----
 
@@ -250,81 +248,3 @@ dados_cen1 %>%
   tidyr::spread(key = Sexo, value = Mean) %>%
   
   dplyr::mutate(Diferença = Homem - Mulher)
-
-
-### 6. Cenário 2 - Aposentados homens até 65 e mulheres até 62 voltam à TP ----
-
-aposentados_aux <- aposentados %>% 
-  
-  magrittr::set_colnames(c("Faixa", "Homem", "Mulher")) %>%
-  
-  tidyr::gather(key = Sexo, value = Aposentados, -Faixa)
-
-dados_cen2 <- dplyr::full_join(dados, aposentados_aux) %>%
-  
-  dplyr::mutate(TP = (PEA/PIA)) %>%
-  
-  dplyr::group_by(Sexo, Faixa) %>%
-  
-  dplyr::mutate(TP = ifelse(is.na(TP), zoo::na.locf(TP), TP)) %>%
-  
-  dplyr::mutate(PEA = ifelse(is.na(PEA), TP*PIA, PEA)) %>%
-  
-  dplyr::mutate(PEA_apos = dplyr::case_when(Sexo == "Homem" & Faixa_num == 10 ~ PEA + Aposentados,
-                                            Sexo == "Mulher" & Faixa_num == 9 ~ PEA + Aposentados)) %>%
-  
-  dplyr::mutate(PEA_apos = ifelse(is.na(PEA_apos), PEA, PEA_apos)) %>%
-  
-  dplyr::mutate(TP_apos = PEA_apos/PIA) %>%
-  
-  dplyr::group_by(Ano) %>%
-  
-  dplyr::mutate(PIA_total = sum(PIA)) %>%
-  
-  dplyr::mutate(theta = (PIA/PIA_total)) %>%
-  
-  dplyr::group_by(Sexo, Faixa) %>%
-  
-  dplyr::mutate(d_theta = (theta - dplyr::lag(theta,1)),
-                
-                d_TP = (TP - dplyr::lag(TP,1)),
-                
-                TP_l1 = dplyr::lag(TP,1),
-                
-                theta_l1 = dplyr::lag(theta,1)) %>%
-  
-  dplyr::mutate(EC = d_theta*TP_l1*100,
-                
-                EP = d_TP*theta_l1*100) %>%
-  
-  dplyr::ungroup()
-
-cen_2 <- dados_cen2 %>%
-  
-  dplyr::group_by(Ano) %>%
-  
-  dplyr::summarise(EC = sum(EC)) %>%
-  
-  dplyr::ungroup() %>%
-  
-  dplyr::filter(Ano >= 2020) %>%
-  
-  dplyr::mutate("EC acumulado" = cumsum(dplyr::coalesce(EC, 0)))
-
-cen_2 %>%
-  
-  tidyr::drop_na() %>%
-  
-  ggplot(aes(x = lubridate::make_date(year = Ano))) + 
-  
-  geom_col(aes(y = `EC acumulado`), fill = "steelblue3") +
-  
-  labs(title = "Efeito acumulado da composição demográfica sobre a taxa de participação (p.p)",
-       subtitle = "Hipótese: Aposentados voltam à força de trabalho",
-       x = "", y = "") +
-  
-  theme_minimal() +
-  
-  geom_hline(yintercept = 0, size = 1) +
-  
-  scale_x_date(date_breaks = "3 years", date_labels = "%Y")
