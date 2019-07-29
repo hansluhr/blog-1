@@ -60,7 +60,7 @@ fc_cv_aux <- fc_cv %>%
   
   tidyr::drop_na() %>%
   
-  rownames_to_column(var = "n") %>%
+  tibble::rownames_to_column(var = "n") %>%
   
   dplyr::mutate(n = as.integer(n) %>% as.factor()) %>%
   
