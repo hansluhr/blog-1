@@ -187,9 +187,3 @@ e_focus <- dados_final$einf_12-dados_final$ipca_obs
 e_bei <- dados_final$exp_bei_12-dados_final$ipca_obs 
 
 forecast::dm.test(e_focus, e_bei, h = 24, alternative = "less")
-
-
-###
-
-gecon
-.G3c0n@2015
